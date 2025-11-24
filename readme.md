@@ -38,6 +38,9 @@ async fn main() -> Result<()> {
 
 ## Version
 
+This crate is currently built on `Minecraft Server JSON-RPC Version: 2.0.0 (25w44a)`.  
 
+## build.rs
 
-Just also gonna warn you that the code in `build.rs` for generating the bindings is abysmal dogshit & the worst rust code i've written but if it works it works.
+Just also gonna warn you that the code in `build.rs` for generating the bindings is abysmal dogshit & the worst rust code i've written but if it works it works.  
+And before this crate ever gets published or anything it needs HEAVY refactoring because like, dont look at the coooode plsss.  
