@@ -8,7 +8,7 @@ Built with **[pale](https://github.com/VilleOlof/pale)** to get a smooth websock
 
 ## Example
 ```rust
-use mc_rpc::{Client, Difficulty, pale::{ClientConfig, Result}};
+use mc_rpc::{Client, ClientConfig, Difficulty, Result, StreamExt};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
     let players = client.players().await?;
 
     // Get notified when the server is saved
-    while let Some(_) = client.sub_server_saved().await?.next().await {
+    while let Some(_) = client.notification_server_saved().await?.next().await {
         println!("Server just got saved");
     }
 
@@ -42,5 +42,107 @@ This crate is currently built on `Minecraft Server JSON-RPC Version: 2.0.0 (25w4
 
 ## build.rs
 
-Just also gonna warn you that the code in `build.rs` for generating the bindings is abysmal dogshit & the worst rust code i've written but if it works it works.  
-And before this crate ever gets published or anything it needs HEAVY refactoring because like, dont look at the coooode plsss.  
+Some examples on how the crate converts the RPC schema to rust code.  
+
+### Examples
+
+#### Structs
+```json
+"operator": {
+    "properties": {
+        "bypassesPlayerLimit": {
+            "type": "boolean"
+        },
+        "permissionLevel": {
+            "type": "integer"
+        },
+        "player": {
+            "$ref": "#/components/schemas/player"
+        }
+    },
+    "type": "object"
+},
+```
+```rust
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
+pub struct Operator {
+    #[serde(rename = "bypassesPlayerLimit")]
+    pub bypasses_player_limit: bool,
+    #[serde(rename = "permissionLevel")]
+    pub permission_level: i32,
+    pub player: Player
+}
+```
+#### Enums
+```json
+"game_type": {
+    "enum": [
+        "survival",
+        "creative",
+        "adventure",
+        "spectator"
+    ],
+    "type": "string"
+},
+```
+```rust
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
+pub enum GameType {
+    #[serde(rename = "survival")]
+    Survival,
+    #[serde(rename = "creative")]
+    Creative,
+    #[serde(rename = "adventure")]
+    Adventure,
+    #[serde(rename = "spectator")]
+    Spectator
+}
+```
+#### Request Functions
+```json
+"description": "Send a system message",
+"name": "minecraft:server/system_message",
+"params": [
+    {
+        "name": "message",
+        "required": true,
+        "schema": {
+            "$ref": "#/components/schemas/system_message"
+        }
+    }
+],
+"result": {
+    "name": "sent",
+    "schema": {
+        "type": "boolean"
+    }
+}
+```
+```rust
+/// Send a system message
+pub async fn server_system_message(&self, message: SystemMessage) -> Result<bool> {
+    let mut map: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+    map.insert("message".to_string(), serde_json::to_value(&message)?);
+    self.0.request("minecraft:server/system_message", Some(map)).await
+}
+```
+#### Notification Functions
+```json
+"description": "Player joined",
+"name": "minecraft:notification/players/joined",
+"params": [
+    {
+        "name": "player",
+        "required": true,
+        "schema": {
+            "$ref": "#/components/schemas/player"
+        }
+    }
+]
+```
+```rust
+/// Player joined
+pub async fn notification_players_joined(&self) -> Result<impl Stream<Item = Option<Player>>> {
+    self.0.subscribe("minecraft:notification/players/joined").await
+}
+```

@@ -1,3 +1,4 @@
+use serde_json::Value;
 use std::{env, fs::write};
 
 fn main() {
@@ -7,7 +8,7 @@ fn main() {
     )))
     .expect("Failed to deserialize RPC Schema");
 
-    let code = generate(json_schema).expect("Failed to generate json rpc bindings");
+    let code = generate(&json_schema).expect("Failed to generate json rpc bindings");
 
     write(
         format!("{}/json_rpc_bindings.rs", env::var("OUT_DIR").unwrap()),
@@ -16,50 +17,118 @@ fn main() {
     .expect("Failed to write json_rpc_bindings.rs");
 }
 
-// absolute dogshit, panic full, horrible piss code that generates json rpc bindings from a schema file below
-// you've been warned for horrible absolute dogshit code.
+const CURLY: [char; 2] = ['{', '}'];
+const IDENTATION: &'static str = "    ";
+const FN_IDENTATION: &'static str = "        ";
+const DEFAULT_DERIVES: &'static str =
+    "#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]";
 
-// TODO: Need to really fix everything but the most important one is gamerules
-// Untyped should work, but typed needs fixing and both untyped & typed should be 100% dynamically generated
-// but currently they are both half-constant in the code generation due to them being fucked up. fuck those.
-
-fn generate(schema: serde_json::Value) -> anyhow::Result<String> {
+pub fn generate(schema: &Value) -> Option<String> {
     let mut code = String::new();
 
-    // info
-    code.push_str(&format!(
-        "// Minecraft Server JSON-RPC Version: {}",
-        schema["info"]["version"]
-            .as_str()
-            .ok_or(anyhow::format_err!("No info.title"))?
-    ));
+    code.push_str(dependencies());
+    code.push('\n');
 
-    add_dependencies(&mut code);
-    add_base_lib(&mut code);
-    generate_types(&schema, &mut code)?;
-    generate_request_methods(&schema, &mut code)?;
-    generate_notification_methods(&schema, &mut code)?;
+    code.push_str(&base_client());
+    code.push('\n');
 
-    Ok(code)
-}
+    println!("schemas");
+    for (parent_key, schema) in schema.get("components")?.get("schemas")?.as_object()? {
+        // its either a struct or an enum so we just check both
+        let schema_code = if let Some(c) = EnumData::from_value(&parent_key, &schema) {
+            c.to_code()
+        } else if let Some(c) = StructData::from_value(&parent_key, &schema) {
+            c.to_code()
+        } else {
+            return None;
+        };
 
-fn format_struct_name(name: &str) -> String {
-    name.split("_")
-        .map(|f| {
-            let mut chars = f.chars().collect::<Vec<char>>();
-            chars[0] = chars[0].to_ascii_uppercase();
-            chars.into_iter().collect::<String>()
-        })
-        .collect::<Vec<String>>()
-        .join("")
-}
-
-fn format_field_name(name: &str) -> String {
-    if name == "type" {
-        return "pub _type".to_string();
+        code.push_str(&schema_code);
     }
 
-    let chars = name.chars().collect::<Vec<char>>();
+    // wrap all methods inside the base client
+    code.push_str(&format!("impl Client {}\n", CURLY[0]));
+    for method in schema.get("methods")?.as_array()? {
+        code.push_str(&FunctionData::from_value(&method)?.to_code());
+    }
+    code.push_str(&format!("\n{}", CURLY[1]));
+
+    Some(code)
+}
+
+fn dependencies() -> &'static str {
+    r#"
+use serde::{Deserialize, Serialize};
+use tokio_stream::Stream;
+pub use pale::{ClientConfig, Result, PaleError, RPCError, StreamExt, WebSocketConfig};"#
+}
+
+fn base_client() -> String {
+    // this is just because it messes up my code highlighter when using curlies in weird context in string literals
+    format!(
+        r#"
+#[derive(Debug, Clone)]
+pub struct Client(pub(crate) pale::Client);
+
+impl Client {0}
+    pub async fn new(uri: impl AsRef<str>, config: ClientConfig) -> Result<Self> {0}
+        Ok(Self(pale::Client::new(uri, config).await?))
+    {1}
+{1}"#,
+        CURLY[0], CURLY[1]
+    )
+}
+
+#[derive(Debug, Clone)]
+struct RustType(String);
+impl RustType {
+    fn new(type_data: &Value, struct_key: Option<&str>, parent_key: Option<&str>) -> Option<Self> {
+        let _type = if type_data.get("enum").is_some()
+            || type_data.get("type").unwrap_or(&Value::Null).is_array()
+        {
+            // the enum/union type for this will get checked from the callers code generation
+            match (struct_key, parent_key) {
+                (Some(struct_key), Some(parent_key)) => {
+                    schema_type_to_rust(&format!("{struct_key}_{parent_key}"))
+                }
+                _ => return None,
+            }
+        } else if let Some(_type) = type_data.get("type") {
+            let _type = _type.as_str()?;
+            if _type == "array" {
+                let items = type_data.get("items")?.as_object()?;
+                let vec_type = if let Some(item_type) = items.get("type") {
+                    item_type.as_str()?
+                } else if let Some(item_ref) = items.get("$ref") {
+                    item_ref.as_str()?.split('/').last()?
+                } else {
+                    return None;
+                };
+                format!("Vec<{}>", schema_type_to_rust(vec_type))
+            } else {
+                schema_type_to_rust(_type)
+            }
+        } else if let Some(_ref) = type_data.get("$ref") {
+            schema_type_to_rust(_ref.as_str()?.split('/').last()?)
+        } else {
+            return None;
+        };
+
+        Some(Self(_type))
+    }
+
+    fn new_empty() -> Self {
+        Self("()".to_string())
+    }
+
+    fn inner(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Returns a bool that indicates if the string was modified & as well as making the text snake_case
+fn field_case(text: &str) -> (String, bool) {
+    let chars = text.chars().collect::<Vec<char>>();
     let mut new_name = String::new();
     let mut is_renamed = false;
     for char in chars {
@@ -71,322 +140,442 @@ fn format_field_name(name: &str) -> String {
         new_name.push(char.to_ascii_lowercase());
     }
 
-    if is_renamed {
-        return format!("#[serde(rename = \"{name}\")]\n    pub {new_name}");
+    // rust grr
+    if new_name == "type" {
+        new_name = "_type".to_string();
+        is_renamed = true;
     }
 
-    format!("pub {new_name}")
+    (new_name, is_renamed)
 }
 
-fn get_rust_type(type_data: &serde_json::Value) -> anyhow::Result<String> {
-    fn primitive_type(_type: &str) -> anyhow::Result<&'static str> {
-        Ok(match _type {
-            "string" => "String",
-            "boolean" => "bool",
-            "integer" => "i32",
-            _ => anyhow::bail!("Invalid schema type"),
+fn to_pascal_case(text: &str) -> String {
+    const DELIMITER: char = '_';
+    text.split(DELIMITER)
+        .map(|f| {
+            let mut chars = f.to_lowercase().chars().collect::<Vec<char>>();
+            chars[0] = chars[0].to_ascii_uppercase();
+            chars.into_iter().collect::<String>()
+        })
+        .collect::<Vec<String>>()
+        .join("")
+}
+
+fn schema_type_to_rust(rust_type: &str) -> String {
+    match rust_type {
+        "string" => "String".to_string(),
+        "integer" => "i32".to_string(),
+        "boolean" => "bool".to_string(),
+        other => to_pascal_case(other),
+    }
+}
+
+#[derive(Debug)]
+struct StructData {
+    name: String,
+    fields: Vec<Field>,
+}
+
+impl StructData {
+    fn from_value(parent_key: &str, data: &Value) -> Option<Self> {
+        let fields = data
+            .get("properties")?
+            .as_object()?
+            .iter()
+            .map(|(name, data)| Field::from_value(&parent_key, &name, data))
+            .collect::<Option<Vec<Field>>>()?;
+
+        Some(StructData {
+            name: parent_key.to_string(),
+            fields,
         })
     }
-    if let Some(_ref) = type_data.get("$ref").map(|s| s.as_str().unwrap()) {
-        let ref_name = _ref
-            .split("/")
-            .last()
-            .ok_or(anyhow::format_err!("Invalid schema ref name"))?;
-        return Ok(format_struct_name(ref_name));
-    }
 
-    let _type = type_data["type"].as_str().unwrap();
-    if _type == "array" {
-        if let Some(_ref) = type_data["items"].get("$ref").map(|s| s.as_str().unwrap()) {
-            let ref_name = _ref
-                .split("/")
-                .last()
-                .ok_or(anyhow::format_err!("Invalid schema ref name"))?;
-            return Ok(format!("Vec<{}>", format_struct_name(ref_name)));
-        }
+    fn to_code(self) -> String {
+        let mut code = String::new();
 
-        return Ok(format!(
-            "Vec<{}>",
-            primitive_type(type_data["items"]["type"].as_str().unwrap())?
-        ));
-    }
-
-    Ok(primitive_type(_type)?.to_string())
-}
-
-fn add_dependencies(code: &mut String) {
-    code.push_str(
-        r#"
-use serde::{Deserialize, Serialize};
-pub use pale::{ClientConfig, Result, PaleError, RPCError, StreamExt, WebSocketConfig};
-"#,
-    );
-}
-
-fn add_base_lib(code: &mut String) {
-    code.push_str(
-            r#"
-    #[derive(Debug, Clone)]
-    pub struct Client(pub(crate) pale::Client);
-
-    impl Client {
-        pub async fn new(uri: impl AsRef<str>, config: ClientConfig) -> Result<Self> {
-            Ok(Self(pale::Client::new(uri, config).await?))
-        }
-    }
-
-    macro_rules! params {
-        ( $( ($key:expr, $value:expr) ),* $(,)? ) => {{
-            let mut map: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
-            $(
-                map.insert(
-                    $key.to_string(),
-                    serde_json::to_value(&$value)?,
-                );
-            )*
-            Some(map)
-        }};
-    }
-
-    #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
-    #[serde(untagged)]
-    pub enum IntegerOrBoolean {
-        Boolean(bool),
-        Integer(i32)
-    }
-    "#,
-        );
-}
-
-fn generate_types(schema: &serde_json::Value, code: &mut String) -> anyhow::Result<()> {
-    let schemas = schema["components"]["schemas"]
-        .as_object()
-        .ok_or(anyhow::format_err!("components.schemas is not an object"))?;
-
-    for (name, data) in schemas {
-        println!("{name}, {data:?}");
-
-        // TODO: move this into a dynamic one and where the enum used here is generated and not constant
-        // i dont wanna fucking deal with this "oooh a value can be either one of 2 types bullshit"
-        if name == "typed_game_rule" || name == "untyped_game_rule" {
-            code.push_str(&format!(
-                r#"
-pub type {} = std::collections::HashMap<String, IntegerOrBoolean>;
-"#,
-                format_struct_name(name)
-            ));
-
-            continue;
-        }
-
-        // handle enum types
-        if let Some(enum_data) = data.get("enum").map(|e| e.as_array().unwrap()) {
-            code.push_str(&format!(
-                r#"
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
-pub enum {} {{
-{}
-}}
-"#,
-                format_struct_name(name),
-                enum_data
-                    .iter()
-                    .map(|v| {
-                        let name = v.as_str().unwrap();
-                        let variant_name = format_struct_name(name);
-                        format!("    #[serde(rename = \"{name}\")]\n    {variant_name}")
-                    })
-                    .collect::<Vec<String>>()
-                    .join(",\n")
-            ));
-
-            continue;
-        }
-        // only structs past here
-        if data["type"].as_str().ok_or(anyhow::format_err!(
-            "components.schemas.type is not a string"
-        ))? != "object"
-        {
-            continue;
-        }
-
-        let props = data["properties"].as_object().ok_or(anyhow::format_err!(
-            "components.schemas[x].properties is not an object"
-        ))?;
-        let mut fields = String::new();
-
-        for (i, (field_name, type_data)) in props.iter().enumerate() {
-            let _type = get_rust_type(&type_data)?;
-            let name = format_field_name(&field_name);
-            fields.push_str(&format!(
-                "    {name}: {_type}{}",
-                if i != (props.len() - 1) { ",\n" } else { "" }
-            ));
-        }
-
+        code.push_str(&format!("{DEFAULT_DERIVES}\n"));
         code.push_str(&format!(
-            r#"
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
-pub struct {} {{
-{fields}
-}}
-"#,
-            format_struct_name(name)
+            "pub struct {} {}\n",
+            to_pascal_case(&self.name),
+            CURLY[0]
         ));
-    }
 
-    Ok(())
-}
+        // we generate this here because of &self but add it on at the end
+        let enum_arg_code = self.get_arg_enums();
 
-fn get_function_name(name: &str) -> String {
-    name.replace("minecraft:", "")
-        .replace("notification:", "")
-        .replace("minecraft:notification/", "")
-        .replace("/", "_")
-}
+        let field_len = self.fields.len();
+        for (i, field) in self.fields.into_iter().enumerate() {
+            code.push_str(&field.to_code());
 
-fn generate_request_methods(schema: &serde_json::Value, code: &mut String) -> anyhow::Result<()> {
-    let methods: Vec<&serde_json::Map<String, serde_json::Value>> = schema["methods"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_object().unwrap())
-        .collect();
-
-    let mut rust_methods = String::new();
-
-    for method in methods {
-        let docs = format!(
-            "/// {}",
-            method["description"]
-                .as_str()
-                .ok_or(anyhow::format_err!("methods.description is not a string"))?
-        );
-        let endpoint = method["name"]
-            .as_str()
-            .ok_or(anyhow::format_err!("methods.name is not a string"))?;
-        if endpoint.starts_with("minecraft:notification") {
-            continue;
-        }
-
-        let fn_name = get_function_name(endpoint);
-        let arg_names = method["params"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|n| {
-                let name = n["name"].as_str().unwrap();
-                format!(
-                    "(\"{name}\", {})",
-                    if name == "use" {
-                        format!("_{name}")
-                    } else {
-                        name.to_string()
-                    }
-                )
-            })
-            .collect::<Vec<String>>();
-        let arg_params = method["params"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|p| {
-                let param_type = get_rust_type(&p["schema"]).unwrap();
-                let name = p["name"].as_str().unwrap();
-                format!(
-                    "{}: {}",
-                    if name == "use" {
-                        format!("_{name}")
-                    } else {
-                        name.to_string()
-                    },
-                    param_type
-                )
-            })
-            .collect::<Vec<String>>();
-        let return_type = get_rust_type(&method["result"]["schema"])?;
-
-        rust_methods.push_str(&format!(
-            r#"    {docs}
-    pub async fn {fn_name}(&self{}) -> Result<{return_type}> {{
-        self.0.request("{endpoint}", {}).await
-    }}
-"#,
-            if arg_params.len() > 0 {
-                &format!(", {}", arg_params.join(", "))
-            } else {
-                ""
-            },
-            if arg_names.len() > 0 {
-                &format!("params![{}]", arg_names.join(","))
-            } else {
-                "None"
+            if i != (field_len - 1) {
+                code.push_str(",\n");
             }
-        ));
-    }
-
-    code.push_str(&format!(
-        r#"
-impl Client {{
-{rust_methods}
-}}
-"#
-    ));
-
-    Ok(())
-}
-
-fn generate_notification_methods(
-    schema: &serde_json::Value,
-    code: &mut String,
-) -> anyhow::Result<()> {
-    let methods: Vec<&serde_json::Map<String, serde_json::Value>> = schema["methods"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_object().unwrap())
-        .collect();
-
-    let mut rust_methods = String::new();
-
-    for method in methods {
-        let endpoint = method["name"]
-            .as_str()
-            .ok_or(anyhow::format_err!("methods.name is not a string"))?;
-        if !endpoint.starts_with("minecraft:notification") {
-            continue;
         }
 
-        let docs = method["description"]
-            .as_str()
-            .ok_or(anyhow::format_err!("methods.description is not a string"))?;
-        let fn_name = get_function_name(endpoint);
+        code.push('\n');
+        code.push(CURLY[1]);
+        code.push('\n');
 
-        let return_type = if let Some(return_elem) = method["params"]
-            .as_array()
-            .ok_or(anyhow::format_err!("methods.params is not a string"))?
-            .first()
-        {
-            get_rust_type(&return_elem["schema"])?
+        if !enum_arg_code.is_empty() {
+            code.push_str(&enum_arg_code);
+        }
+
+        code
+    }
+
+    fn get_arg_enums(&self) -> String {
+        let mut code = String::new();
+
+        for field in &self.fields {
+            // common derives
+            if !(field.type_union.is_some() || field.type_enum.is_some()) {
+                continue;
+            }
+
+            code.push_str(&format!("{DEFAULT_DERIVES}\n"));
+
+            if let Some(union) = &field.type_enum {
+                code.push_str(&format!(
+                    "pub enum {} {}\n",
+                    field.rust_type.inner(),
+                    CURLY[0]
+                ));
+                for (i, variant) in union.iter().enumerate() {
+                    code.push_str(&format!("{IDENTATION}#[serde(rename = \"{}\")]\n", variant));
+                    code.push_str(IDENTATION);
+                    code.push_str(&to_pascal_case(&variant));
+
+                    if i != (union.len() - 1) {
+                        code.push_str(",\n");
+                    }
+                }
+            } else if let Some(_enum) = &field.type_union {
+                code.push_str("#[serde(untagged)]\n");
+
+                code.push_str(&format!(
+                    "pub enum {} {}\n",
+                    field.rust_type.inner(),
+                    CURLY[0]
+                ));
+
+                for (i, variant) in _enum.iter().enumerate() {
+                    code.push_str(&format!(
+                        "{IDENTATION}{}({})",
+                        to_pascal_case(&variant),
+                        schema_type_to_rust(&variant)
+                    ));
+
+                    if i != (_enum.len() - 1) {
+                        code.push_str(",\n");
+                    }
+                }
+            }
+
+            // common ending
+            code.push('\n');
+            code.push(CURLY[1]);
+            code.push('\n');
+        }
+
+        code
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Field {
+    name: String,
+    rust_type: RustType,
+    attribute: Option<String>,
+    type_union: Option<Vec<String>>,
+    type_enum: Option<Vec<String>>,
+}
+
+impl Field {
+    fn from_value(struct_key: &str, parent_key: &str, data: &Value) -> Option<Self> {
+        Some(Field {
+            name: parent_key.to_string(),
+            rust_type: RustType::new(&data, Some(struct_key), Some(parent_key))?,
+            attribute: None,
+            type_union: if data.get("type").unwrap_or(&Value::Null).is_array() {
+                Some(
+                    data.get("type")?
+                        .as_array()?
+                        .iter()
+                        .map(|s| s.as_str().unwrap().to_string())
+                        .collect(),
+                )
+            } else {
+                None
+            },
+            type_enum: data.get("enum").map(|e| {
+                e.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|s| s.as_str().unwrap().to_string())
+                    .collect()
+            }),
+        })
+    }
+
+    fn to_code(self) -> String {
+        let mut field = String::new();
+
+        if let Some(attr) = self.attribute {
+            field.push_str(&format!("{IDENTATION}{attr}\n"));
+        }
+
+        let (field_name, name_modified) = field_case(&self.name);
+        if name_modified {
+            field.push_str(&format!(
+                "{IDENTATION}#[serde(rename = \"{}\")]\n",
+                self.name
+            ));
+        }
+
+        field.push_str(&format!(
+            "{IDENTATION}pub {}: {}",
+            field_name,
+            self.rust_type.inner()
+        ));
+
+        field
+    }
+}
+
+#[derive(Debug)]
+struct EnumData {
+    name: String,
+    variants: Vec<String>,
+    enum_type: String,
+    attribute: Option<String>,
+}
+
+impl EnumData {
+    fn from_value(parent_key: &str, data: &Value) -> Option<Self> {
+        let variants = data
+            .get("enum")?
+            .as_array()?
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect::<Vec<String>>();
+        let enum_type = data.get("type")?.as_str()?.to_string();
+
+        Some(EnumData {
+            name: parent_key.to_string(),
+            variants,
+            enum_type,
+            attribute: None,
+        })
+    }
+
+    fn to_code(self) -> String {
+        let mut code = String::new();
+
+        if self.enum_type != "string" {
+            unimplemented!(
+                "Any other rust type other than string is currently not supported, if this panic was naturally triggered via the autogenerated schema then this will need to be implemented."
+            );
+        }
+
+        code.push_str(&format!("{DEFAULT_DERIVES}\n"));
+        if let Some(attr) = self.attribute {
+            code.push_str(&attr);
+            code.push('\n');
+        }
+        code.push_str(&format!(
+            "pub enum {} {}\n",
+            to_pascal_case(&self.name),
+            CURLY[0]
+        ));
+
+        let variant_len = self.variants.len();
+        for (i, variant) in self.variants.into_iter().enumerate() {
+            code.push_str(&format!("{IDENTATION}#[serde(rename = \"{variant}\")]\n"));
+            code.push_str(&format!("{IDENTATION}{}", to_pascal_case(&variant)));
+
+            if i != (variant_len - 1) {
+                code.push_str(",\n");
+            }
+        }
+
+        code.push('\n');
+        code.push(CURLY[1]);
+        code.push('\n');
+
+        code
+    }
+}
+
+#[derive(Debug)]
+struct FunctionData {
+    doc: String,
+    name: String,
+    endpoint: String,
+    function_type: FunctionType,
+    params: Vec<FunctionParam>,
+    return_type: RustType,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionParam {
+    raw_name: String,
+    name: String,
+    rust_type: RustType,
+}
+
+#[derive(Debug)]
+enum FunctionType {
+    Request,
+    Notification,
+}
+
+impl FunctionData {
+    fn from_value(data: &Value) -> Option<Self> {
+        let doc = data.get("description")?.as_str()?.to_string();
+        let name = data
+            .get("name")?
+            .as_str()?
+            .trim_start_matches("minecraft:")
+            .replace('/', "_");
+        let endpoint = data.get("name")?.as_str()?.to_string();
+
+        let function_type = if name.starts_with("notification") {
+            FunctionType::Notification
         } else {
-            "()".to_string()
+            FunctionType::Request
+        };
+        println!("{doc:?}, {name:?}, {endpoint:?}, {function_type:?}");
+
+        let (params, return_type) = match function_type {
+            FunctionType::Request => {
+                let params: Vec<FunctionParam> = data
+                    .get("params")?
+                    .as_array()?
+                    .iter()
+                    .map(|p| FunctionParam::from_value(p))
+                    .collect::<Option<Vec<FunctionParam>>>()?;
+                let return_type = if let Some(return_data) = data.get("result") {
+                    RustType::new(return_data.get("schema")?, None, None)?
+                } else {
+                    RustType::new_empty()
+                };
+
+                (params, return_type)
+            }
+            FunctionType::Notification => {
+                // the param in notifications IS the return type since they dont have any params
+                (
+                    vec![],
+                    if let Some(result) = data.get("params")?.as_array()?.get(0) {
+                        RustType::new(result.as_object()?.get("schema")?, None, None)?
+                    } else {
+                        RustType::new_empty()
+                    },
+                )
+            }
         };
 
-        rust_methods.push_str(&format!(
-            r#"    /// {docs}
-    pub async fn sub_{fn_name}(&self) -> Result<impl tokio_stream::Stream<Item = Option<{return_type}>>> {{
-        self.0.subscribe("{endpoint}").await
-    }}
-"#));
+        Some(FunctionData {
+            doc,
+            name,
+            endpoint,
+            function_type,
+            params,
+            return_type,
+        })
     }
 
-    code.push_str(&format!(
-        r#"
-impl Client {{
-{rust_methods}
-}}
-"#
-    ));
+    fn to_code(self) -> String {
+        let mut code = String::new();
 
-    Ok(())
+        let mut args = vec!["&self".to_string()];
+        args.append(
+            &mut self
+                .params
+                .clone()
+                .into_iter()
+                .map(|s| s.to_code())
+                .collect::<Vec<String>>(),
+        );
+
+        code.push_str(&format!("{IDENTATION}/// {}\n", self.doc));
+        code.push_str(&format!(
+            "{IDENTATION}pub async fn {}({}) -> Result<",
+            field_case(&self.name).0,
+            args.join(", ")
+        ));
+
+        match self.function_type {
+            FunctionType::Notification => {
+                code.push_str(&format!(
+                    "impl Stream<Item = Option<Vec<{}>>>",
+                    self.return_type.inner()
+                ));
+            }
+            FunctionType::Request => {
+                code.push_str(self.return_type.inner());
+            }
+        }
+        code.push_str(&format!("> {}\n", CURLY[0]));
+
+        match self.function_type {
+            FunctionType::Notification => {
+                code.push_str(&format!(
+                    "{FN_IDENTATION}self.0.subscribe(\"{}\").await",
+                    self.endpoint
+                ));
+            }
+            FunctionType::Request => {
+                if self.params.is_empty() {
+                    code.push_str(&format!(
+                        "{FN_IDENTATION}self.0.request(\"{}\", None).await",
+                        self.endpoint
+                    ));
+                } else {
+                    // move all args into a hashmap
+                    code.push_str(
+                        &format!("{FN_IDENTATION}let mut map: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();\n"),
+                    );
+                    for param in self.params {
+                        code.push_str(&format!(
+                            "{FN_IDENTATION}map.insert(\"{}\".to_string(), serde_json::to_value(&{})?);\n",
+                            param.raw_name, param.name
+                        ));
+                    }
+
+                    code.push_str(&format!(
+                        "{FN_IDENTATION}self.0.request(\"{}\", Some(map)).await",
+                        self.endpoint
+                    ));
+                }
+            }
+        };
+
+        code.push_str(&format!("\n{IDENTATION}{}\n", CURLY[1]));
+
+        code
+    }
+}
+
+impl FunctionParam {
+    fn from_value(data: &Value) -> Option<Self> {
+        let raw_name = data.get("name")?.as_str()?.to_string();
+        let name = if raw_name.starts_with("type") || raw_name.starts_with("use") {
+            format!("_{}", raw_name)
+        } else {
+            raw_name.to_string()
+        };
+        let rust_type = RustType::new(data.get("schema")?, None, None)?;
+
+        Some(FunctionParam {
+            raw_name,
+            name,
+            rust_type,
+        })
+    }
+
+    fn to_code(self) -> String {
+        format!("{}: {}", self.name, self.rust_type.inner())
+    }
 }
