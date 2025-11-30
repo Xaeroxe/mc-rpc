@@ -563,8 +563,10 @@ impl FunctionData {
 
         match self.function_type {
             FunctionType::Notification => {
+                // Mojang doesn't quite follow their own schema, so we infer an extra array
+                // wrapping it in order to reflect what Mojang actually sends.
                 code.push_str(&format!(
-                    "impl Stream<Item = Option<Vec<{}>>>",
+                    "impl Stream<Item = Option<std::result::Result<Vec<{}>, serde_json::Error>>>",
                     self.return_type.inner()
                 ));
             }
