@@ -18,6 +18,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-rs"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cde4c9ce1d8e6e94b4c0ee341c000d79335b7c55b7d7979b36ca803c85c091ba"
+dependencies = [
+ "unicode-ident",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -317,7 +326,8 @@ checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 name = "mc-rpc"
 version = "0.1.1"
 dependencies = [
- "pale",
+ "build-rs",
+ "pale 0.1.0 (git+https://github.com/Xaeroxe/pale.git?rev=9801a22d29d043388c1b78553e0add262de9b164)",
  "serde",
  "serde_json",
  "tokio-stream",
@@ -421,6 +431,24 @@ name = "pale"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1a7e0c99cd016c0dd9ed4ec2cce485b700c95c902ee00452acf71344f0c8dd7"
+dependencies = [
+ "futures",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "pale"
+version = "0.1.0"
+source = "git+https://github.com/Xaeroxe/pale.git?rev=9801a22d29d043388c1b78553e0add262de9b164#9801a22d29d043388c1b78553e0add262de9b164"
 dependencies = [
  "futures",
  "futures-util",
@@ -554,7 +582,7 @@ name = "schema_fetch"
 version = "0.1.0"
 dependencies = [
  "dotenvy",
- "pale",
+ "pale 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "serde_json",
  "tokio",

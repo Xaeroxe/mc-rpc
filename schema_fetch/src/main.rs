@@ -15,16 +15,23 @@ async fn main() -> Result<()> {
     )
     .await?;
     let schema: Value = client.request("rpc.discover", None).await?;
+    // Attempt to extract the version identifier
+    let version = schema.get("info").and_then(|i| i.get("version"));
+    let file_name = if let Some(version) = version.and_then(|v| v.as_str()) {
+        format!("schema-{version}.json")
+    } else {
+        "schema.json".to_string()
+    };
     let formatter = PrettyFormatter::with_indent(b"    ");
     let mut serializer = Serializer::with_formatter(
         BufWriter::new(
-            File::create(concat!(env!("CARGO_MANIFEST_DIR"), "/../schema.json")).unwrap(),
+            File::create(format!("{}/../{file_name}", env!("CARGO_MANIFEST_DIR"))).unwrap(),
         ),
         formatter,
     );
     schema
         .serialize(&mut serializer)
-        .expect("Failed to write new schema.json file");
+        .expect("Failed to write new schema file");
 
     Ok(())
 }
