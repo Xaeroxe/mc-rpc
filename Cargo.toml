@@ -10,7 +10,7 @@ repository = "https://github.com/VilleOlof/mc-rpc"
 exclude = ["schema_fetch"]
 
 [dependencies]
-pale = { git = "https://github.com/Xaeroxe/pale.git", rev = "17d249a18e075fb9978d63dd64c70d514a69a18d" }
+pale = { git = "https://github.com/Xaeroxe/pale.git", rev = "637a88e23f08ba24570d1ede1bb2bb50ad09f73f" }
 serde = { version = "1.0", features = ["derive"] }
 tokio-stream = { version = "0.1.17", features = ["sync"] }
 serde_json = "1.0"
