@@ -68,8 +68,10 @@ pub fn generate(schema: &Value) -> Option<String> {
 
 fn dependencies() -> &'static str {
     r#"
+use std::{result::Result as StdResult, time::Duration};
 use serde::{Deserialize, Serialize};
-use tokio_stream::Stream;
+use futures_util::TryStreamExt as _;
+use tokio_stream::{Stream, wrappers::{BroadcastStream, errors::BroadcastStreamRecvError}};
 pub use pale::{ClientConfig, Result, PaleError, RPCError, StreamExt, WebSocketConfig};"#
 }
 
@@ -84,6 +86,49 @@ impl Client {0}
     pub async fn new(uri: impl AsRef<str>, config: ClientConfig) -> Result<Self> {0}
         Ok(Self(pale::Client::new(uri, config).await?))
     {1}
+
+    /// Calling [`Self::close`] means:
+    /// - Closing the underlying connection.
+    /// - Any and all internal client communication
+    /// - Closing every subscription stream
+    ///
+    /// The [`Client`] is not guaranteed to be 100% closed after this function returns.
+    /// It may take a little while, use [`Self::wait_for_connection`] to make sure before, let's say reconnecting.
+    pub async fn close(&self) -> Result<()> {0}
+        self.0.close().await
+    {1}
+
+    /// Returns if the underlying socket is actively connected.
+    pub async fn is_connected(&self) -> bool {0}
+        self.0.is_connected().await
+    {1}
+
+    /// Returns when the [`Self::is_connected`] is equal to `state`
+    ///
+    /// If [`Self::is_connected`] already matches `state`, it instantly returns
+    ///
+    /// ## Example
+    /// ```no_run
+    /// // waits for the underlying connection to be ready & connected
+    /// client.wait_for_connection(true, Duration::from_secs(5)).await;
+    ///
+    /// // waits for the connection to disconnect
+    /// client.wait_for_connection(false, Duration::from_secs(5)).await;
+    /// ```
+    pub async fn wait_for_connection(&self, state: bool, timeout_duration: Duration) -> Result<()> {0}
+        self.0.wait_for_connection(state, timeout_duration).await
+    {1}
+
+    /// Returns a [`Stream`] where a message of type [`Client`] will be sent upon each successful reconnection.
+    pub fn on_reconnect(&self) -> impl Stream<Item = StdResult<Self, BroadcastStreamRecvError>> {0}
+        BroadcastStream::new(self.0.on_reconnect()).map_ok(Self)
+    {1}
+
+    /// Returns a [`Stream`] where a message of type [`Client`] will be sent upon disconnect.
+    pub fn on_disconnect(&self) -> impl Stream<Item = StdResult<Self, BroadcastStreamRecvError>> {0}
+        BroadcastStream::new(self.0.on_disconnect()).map_ok(Self)
+    {1}
+
 {1}"#,
         CURLY[0], CURLY[1]
     )
