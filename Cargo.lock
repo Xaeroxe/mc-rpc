@@ -328,7 +328,7 @@ version = "0.1.1"
 dependencies = [
  "build-rs",
  "futures-util",
- "pale 0.1.0 (git+https://github.com/Xaeroxe/pale.git?rev=9801a22d29d043388c1b78553e0add262de9b164)",
+ "pale 0.1.0 (git+https://github.com/Xaeroxe/pale.git?rev=17d249a18e075fb9978d63dd64c70d514a69a18d)",
  "serde",
  "serde_json",
  "tokio-stream",
@@ -449,7 +449,7 @@ dependencies = [
 [[package]]
 name = "pale"
 version = "0.1.0"
-source = "git+https://github.com/Xaeroxe/pale.git?rev=9801a22d29d043388c1b78553e0add262de9b164#9801a22d29d043388c1b78553e0add262de9b164"
+source = "git+https://github.com/Xaeroxe/pale.git?rev=17d249a18e075fb9978d63dd64c70d514a69a18d#17d249a18e075fb9978d63dd64c70d514a69a18d"
 dependencies = [
  "futures",
  "futures-util",
