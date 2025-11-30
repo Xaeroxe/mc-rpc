@@ -1,9 +1,9 @@
-use serde::ser::Serialize;
-use std::fs::File;
-
 use pale::{Client, ClientConfig, Result};
+use serde::ser::Serialize;
 use serde_json::ser::PrettyFormatter;
 use serde_json::{Serializer, Value};
+use std::fs::File;
+use std::io::BufWriter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,7 +17,9 @@ async fn main() -> Result<()> {
     let schema: Value = client.request("rpc.discover", None).await?;
     let formatter = PrettyFormatter::with_indent(b"    ");
     let mut serializer = Serializer::with_formatter(
-        File::create(concat!(env!("CARGO_MANIFEST_DIR"), "/../schema.json")).unwrap(),
+        BufWriter::new(
+            File::create(concat!(env!("CARGO_MANIFEST_DIR"), "/../schema.json")).unwrap(),
+        ),
         formatter,
     );
     schema
