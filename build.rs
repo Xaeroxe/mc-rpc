@@ -495,7 +495,7 @@ impl FunctionData {
             .replace('/', "_");
         let endpoint = data.get("name")?.as_str()?.to_string();
 
-        let function_type = if name.starts_with("notification") {
+        let function_type = if data.get("result").is_none() {
             FunctionType::Notification
         } else {
             FunctionType::Request
