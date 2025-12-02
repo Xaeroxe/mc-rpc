@@ -315,7 +315,7 @@ checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
 name = "mc-rpc"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "futures-util",
  "pale",
@@ -419,9 +419,9 @@ dependencies = [
 
 [[package]]
 name = "pale"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1a7e0c99cd016c0dd9ed4ec2cce485b700c95c902ee00452acf71344f0c8dd7"
+checksum = "3858f3c879f5203fbbae2e0a7b34e4417ff98dc7bd4090a2690d76eb1a78c0b1"
 dependencies = [
  "futures",
  "futures-util",

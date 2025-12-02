@@ -3,14 +3,14 @@ name = "mc-rpc"
 description = "Generated JSON RPC Bindings for Minecraft Server Management Protocol Client"
 authors = ["VilleOlof"]
 license = "MIT"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 keywords = ["minecraft", "rpc", "json", "client"]
 repository = "https://github.com/VilleOlof/mc-rpc"
 exclude = ["schema_fetch"]
 
 [dependencies]
-pale = "0.1.0"
+pale = "0.1.1"
 serde = { version = "1.0", features = ["derive"] }
 tokio-stream = { version = "0.1.17", features = ["sync"] }
 serde_json = "1.0"

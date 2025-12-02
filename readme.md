@@ -142,7 +142,7 @@ pub async fn server_system_message(&self, message: SystemMessage) -> Result<bool
 ```
 ```rust
 /// Player joined
-pub async fn notification_players_joined(&self) -> Result<impl Stream<Item = Option<Player>>> {
+pub async fn notification_players_joined(&self) -> Result<impl Stream<Item = Option<std::result::Result<Vec<Player>, serde_json::Error>>>> {
     self.0.subscribe("minecraft:notification/players/joined").await
 }
 ```
