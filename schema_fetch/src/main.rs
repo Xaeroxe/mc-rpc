@@ -1,7 +1,9 @@
-use std::fs::write;
-
 use pale::{Client, ClientConfig, Result};
-use serde_json::Value;
+use serde::ser::Serialize;
+use serde_json::ser::PrettyFormatter;
+use serde_json::{Serializer, Value};
+use std::fs::File;
+use std::io::BufWriter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -13,10 +15,15 @@ async fn main() -> Result<()> {
     )
     .await?;
     let schema: Value = client.request("rpc.discover", None).await?;
-
-    let json = serde_json::to_string_pretty(&schema)?;
-
-    write(concat!(env!("CARGO_MANIFEST_DIR"), "/../schema.json"), json)
+    let formatter = PrettyFormatter::with_indent(b"    ");
+    let mut serializer = Serializer::with_formatter(
+        BufWriter::new(
+            File::create(concat!(env!("CARGO_MANIFEST_DIR"), "/../schema.json")).unwrap(),
+        ),
+        formatter,
+    );
+    schema
+        .serialize(&mut serializer)
         .expect("Failed to write new schema.json file");
 
     Ok(())
