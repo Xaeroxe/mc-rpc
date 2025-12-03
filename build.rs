@@ -1,11 +1,14 @@
 use serde_json::Value;
 use std::{fs, fs::write};
 
+const LATEST_VERSION: &str = "2.0.0";
+
 fn main() {
     let mut code = String::new();
     for feature in build_rs::input::cargo_cfg_feature() {
-        if let Some(version) = feature.strip_prefix("protocol_version_") {
+        if let Some(version) = feature.strip_prefix("v_") {
             let dot_version = version.replace('_', ".");
+            let is_latest = dot_version == LATEST_VERSION;
             let schema_contents = fs::read_to_string(format!(
                 "{}/schema-{}.json",
                 build_rs::input::cargo_manifest_dir().display(),
@@ -14,14 +17,20 @@ fn main() {
             .expect("schema file missing");
             let json_schema =
                 serde_json::from_str(&schema_contents).expect("Failed to deserialize RPC Schema");
-
             let module = generate(&json_schema).expect("Failed to generate json rpc bindings");
-            code.push_str(&format!("/// Implements protocol version {dot_version}\npub mod version_{version} {{ {module} }}\n"));
+            if is_latest {
+                code.push_str(module.as_str());
+            } else {
+                code.push_str(&format!("/// Implements protocol version {dot_version}\npub mod v_{version} {{ {module} }}\n"));
+            }
         }
     }
 
     write(
-        format!("{}/json_rpc_bindings.rs", build_rs::input::out_dir().display()),
+        format!(
+            "{}/json_rpc_bindings.rs",
+            build_rs::input::out_dir().display()
+        ),
         code,
     )
     .expect("Failed to write json_rpc_bindings.rs");

@@ -24,10 +24,9 @@ serde_json = "1.0"
 members = ["schema_fetch"]
 
 [features]
-default = ["all_versions"]
-all_versions = [
-    "protocol_version_1_0_0",
-    "protocol_version_2_0_0"
+default = ["latest_version"]
+latest_version = [
+    "v_2_0_0"
 ]
-protocol_version_1_0_0 = []
-protocol_version_2_0_0 = []
+v_1_0_0 = []
+v_2_0_0 = []
