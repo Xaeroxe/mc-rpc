@@ -18,6 +18,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-rs"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cde4c9ce1d8e6e94b4c0ee341c000d79335b7c55b7d7979b36ca803c85c091ba"
+dependencies = [
+ "unicode-ident",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -317,6 +326,7 @@ checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 name = "mc-rpc"
 version = "0.1.2"
 dependencies = [
+ "build-rs",
  "futures-util",
  "pale",
  "serde",

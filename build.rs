@@ -1,17 +1,27 @@
 use serde_json::Value;
-use std::{env, fs::write};
+use std::{fs, fs::write};
 
 fn main() {
-    let json_schema = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/schema.json"
-    )))
-    .expect("Failed to deserialize RPC Schema");
+    let mut code = String::new();
+    for feature in build_rs::input::cargo_cfg_feature() {
+        if let Some(version) = feature.strip_prefix("protocol_version_") {
+            let dot_version = version.replace('_', ".");
+            let schema_contents = fs::read_to_string(format!(
+                "{}/schema-{}.json",
+                build_rs::input::cargo_manifest_dir().display(),
+                dot_version
+            ))
+            .expect("schema file missing");
+            let json_schema =
+                serde_json::from_str(&schema_contents).expect("Failed to deserialize RPC Schema");
 
-    let code = generate(&json_schema).expect("Failed to generate json rpc bindings");
+            let module = generate(&json_schema).expect("Failed to generate json rpc bindings");
+            code.push_str(&format!("/// Implements protocol version {dot_version}\npub mod version_{version} {{ {module} }}\n"));
+        }
+    }
 
     write(
-        format!("{}/json_rpc_bindings.rs", env::var("OUT_DIR").unwrap()),
+        format!("{}/json_rpc_bindings.rs", build_rs::input::out_dir().display()),
         code,
     )
     .expect("Failed to write json_rpc_bindings.rs");
@@ -554,7 +564,7 @@ impl FunctionData {
         match self.function_type {
             FunctionType::Notification => {
                 code.push_str(&format!(
-                    "impl Stream<Item = Option<std::result::Result<Vec<{}>, serde_json::Error>>>",
+                    "impl Stream<Item = Option<Vec<{}>>>",
                     self.return_type.inner()
                 ));
             }
